@@ -1,0 +1,44 @@
+name: Build and Push RNA-MuTect Docker Image
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Login to Seven Bridges Registry
+        uses: docker/login-action@v3
+        with:
+          registry: images.sbgenomics.com
+          username: ${{ secrets.SBG_USERNAME }}
+          password: ${{ secrets.SBG_AUTH_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t images.sbgenomics.com/ts-sandbox/rna_mutect:latest \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push \
+            images.sbgenomics.com/ts-sandbox/rna_mutect:latest
