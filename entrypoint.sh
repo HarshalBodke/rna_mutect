@@ -40,7 +40,7 @@ if [[ "$#" -eq 0 ]]; then
 fi
 
 # -------------------------------------------------------------------------
-# Find HISAT2 index directory
+# Find HISAT2 index directory or archive
 # -------------------------------------------------------------------------
 
 HISAT2_INDEX_DIR=""
@@ -68,13 +68,74 @@ done
 
 if [[ -z "${HISAT2_INDEX_DIR}" ]]; then
 
-    echo "ERROR: HISAT2 index directory was not supplied."
+    echo "ERROR: HISAT2 index directory or archive was not supplied."
     echo "Use:"
     echo "  -h <HISAT2_INDEX_DIRECTORY>"
+    echo "or:"
+    echo "  -h <HISAT2_INDEX_ARCHIVE.tar>"
     exit 1
 
 fi
 
+echo "HISAT2 index input:"
+echo "  ${HISAT2_INDEX_DIR}"
+
+# -------------------------------------------------------------------------
+# If input is a TAR archive, extract it
+# -------------------------------------------------------------------------
+
+if [[ -f "${HISAT2_INDEX_DIR}" && "${HISAT2_INDEX_DIR}" == *.tar ]]; then
+
+    echo ""
+    echo "HISAT2 input is a TAR archive."
+    echo "Extracting archive..."
+
+    HISAT2_ARCHIVE="${HISAT2_INDEX_DIR}"
+
+    # Create temporary extraction directory
+    HISAT2_TMP_DIR="$(mktemp -d /tmp/hisat2_index.XXXXXX)"
+
+    echo "Extraction directory:"
+    echo "  ${HISAT2_TMP_DIR}"
+
+    tar -xf "${HISAT2_ARCHIVE}" -C "${HISAT2_TMP_DIR}"
+
+    # Find the directory containing the HISAT2 index files.
+    # First look recursively for .1.ht2 / .1.ht2l files.
+    mapfile -t INDEX_START_FILES < <(
+        find "${HISAT2_TMP_DIR}" \
+            -type f \
+            \( -name "*.1.ht2" -o -name "*.1.ht2l" \) \
+            | sort
+    )
+
+    if [[ "${#INDEX_START_FILES[@]}" -eq 0 ]]; then
+
+        echo "ERROR: No HISAT2 index files found after extracting:"
+        echo "  ${HISAT2_ARCHIVE}"
+        echo ""
+        echo "Extracted contents:"
+        find "${HISAT2_TMP_DIR}" -maxdepth 3 -type f | head -50
+        exit 1
+
+    fi
+
+    # Use the directory containing the index files
+    HISAT2_INDEX_DIR="$(dirname "${INDEX_START_FILES[0]}")"
+
+    echo ""
+    echo "Extracted HISAT2 index directory:"
+    echo "  ${HISAT2_INDEX_DIR}"
+
+elif [[ ! -d "${HISAT2_INDEX_DIR}" ]]; then
+
+    echo "ERROR: HISAT2 index input is neither a directory nor a .tar archive:"
+    echo "  ${HISAT2_INDEX_DIR}"
+    exit 1
+
+fi
+
+echo ""
 echo "HISAT2 index directory:"
 echo "  ${HISAT2_INDEX_DIR}"
 
