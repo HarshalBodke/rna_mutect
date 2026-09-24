@@ -7,6 +7,20 @@ set -euo pipefail
 # GATK4 + HISAT2
 #
 # Seven Bridges / Docker version
+#
+# IMPORTANT:
+#   entrypoint.sh handles:
+#     - HISAT2 TAR/TAR.GZ extraction
+#     - Funcotator TAR/TAR.GZ extraction
+#
+#   This script receives:
+#     - HISAT2 index PREFIX
+#     - Funcotator data-source DIRECTORY
+# =============================================================================
+
+
+# =============================================================================
+# Usage
 # =============================================================================
 
 usage() {
@@ -17,30 +31,36 @@ usage() {
     echo "     -g <GENOME_FASTA> \\"
     echo "     -p <PANEL_OF_NORMALS> \\"
     echo "     -a <GERMLINE_RESOURCE> \\"
-    echo "     -f <FUNCOTATOR_SOURCES> \\"
-    echo "     -h <HISAT2_INDEX> \\"
+    echo "     -f <FUNCOTATOR_SOURCES_DIRECTORY> \\"
+    echo "     -h <HISAT2_INDEX_PREFIX> \\"
     echo "     -o <OUTPUT_DIR> [-t <THREADS>]"
     echo ""
 
     echo "Required:"
     echo "  -r, --rna-bam"
-    echo "      Input STAR-aligned RNA BAM."
+    echo "      Input RNA-aligned BAM."
     echo ""
+
     echo "  -g, --genome-fasta"
     echo "      GRCh38 reference FASTA."
     echo ""
+
     echo "  -p, --pon"
     echo "      Panel of Normals VCF."
     echo ""
+
     echo "  -a, --germline-resource"
     echo "      Germline resource VCF."
     echo ""
+
     echo "  -f, --funcotator-sources"
-    echo "      Funcotator data sources directory."
+    echo "      Funcotator data sources DIRECTORY."
     echo ""
+
     echo "  -h, --hisat2-index"
-    echo "      HISAT2 index directory/prefix."
+    echo "      HISAT2 index PREFIX."
     echo ""
+
     echo "  -o, --output-dir"
     echo "      Output directory."
     echo ""
@@ -49,6 +69,7 @@ usage() {
     echo "  -n, --normal-bam"
     echo "      Matched normal DNA BAM."
     echo ""
+
     echo "  -s, --normal-sample-name"
     echo "      SM tag of the normal sample."
     echo ""
@@ -60,6 +81,7 @@ usage() {
 
     exit 1
 }
+
 
 # =============================================================================
 # Variables
@@ -78,6 +100,7 @@ GERMLINE_RESOURCE=""
 FUNCOTATOR_DATA_SOURCES=""
 HISAT2_INDEX=""
 OUTPUT_DIR=""
+
 
 # =============================================================================
 # Parse arguments
@@ -98,6 +121,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
 
+
         -n|--normal-bam)
 
             [[ $# -ge 2 ]] || {
@@ -108,6 +132,7 @@ while [[ $# -gt 0 ]]; do
             DNA_BAM_PATH="$2"
             shift 2
             ;;
+
 
         -s|--normal-sample-name)
 
@@ -120,6 +145,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
 
+
         -g|--genome-fasta)
 
             [[ $# -ge 2 ]] || {
@@ -130,6 +156,7 @@ while [[ $# -gt 0 ]]; do
             REFERENCE_FASTA="$2"
             shift 2
             ;;
+
 
         -p|--pon)
 
@@ -142,6 +169,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
 
+
         -a|--germline-resource)
 
             [[ $# -ge 2 ]] || {
@@ -152,6 +180,7 @@ while [[ $# -gt 0 ]]; do
             GERMLINE_RESOURCE="$2"
             shift 2
             ;;
+
 
         -f|--funcotator-sources)
 
@@ -164,6 +193,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
 
+
         -h|--hisat2-index)
 
             [[ $# -ge 2 ]] || {
@@ -174,6 +204,7 @@ while [[ $# -gt 0 ]]; do
             HISAT2_INDEX="$2"
             shift 2
             ;;
+
 
         -o|--output-dir)
 
@@ -186,6 +217,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
 
+
         -t|--threads)
 
             [[ $# -ge 2 ]] || {
@@ -197,10 +229,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
 
+
         -H|--help)
 
             usage
             ;;
+
 
         *)
 
@@ -211,6 +245,7 @@ while [[ $# -gt 0 ]]; do
     esac
 
 done
+
 
 # =============================================================================
 # Validate parameters
@@ -225,9 +260,29 @@ if [[ -z "${RNA_BAM_PATH}" ||
       -z "${OUTPUT_DIR}" ]]; then
 
     echo "ERROR: One or more required arguments are missing."
+
     usage
 
 fi
+
+
+# =============================================================================
+# Validate threads
+# =============================================================================
+
+if ! [[ "${NUM_PARALLEL_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+
+    echo "ERROR: Threads must be a positive integer:"
+    echo "  ${NUM_PARALLEL_JOBS}"
+
+    exit 1
+
+fi
+
+
+# =============================================================================
+# Validate matched-normal parameters
+# =============================================================================
 
 if [[ -n "${DNA_BAM_PATH}" && -z "${NORMAL_SAMPLE_NAME}" ]] ||
    [[ -z "${DNA_BAM_PATH}" && -n "${NORMAL_SAMPLE_NAME}" ]]; then
@@ -236,15 +291,18 @@ if [[ -n "${DNA_BAM_PATH}" && -z "${NORMAL_SAMPLE_NAME}" ]] ||
     echo "Matched-normal mode requires BOTH:"
     echo "  --normal-bam"
     echo "  --normal-sample-name"
+
     exit 1
 
 fi
+
 
 if [[ -n "${DNA_BAM_PATH}" ]]; then
 
     DNA_BAM_N="${DNA_BAM_PATH}"
 
 fi
+
 
 # =============================================================================
 # Validate input files/directories
@@ -254,88 +312,176 @@ echo ""
 echo "Validating inputs..."
 echo "------------------------------------------------------------"
 
+
 if [[ ! -f "${RNA_BAM_PATH}" ]]; then
+
     echo "ERROR: RNA BAM not found:"
     echo "  ${RNA_BAM_PATH}"
+
     exit 1
+
 fi
+
 
 if [[ ! -f "${REFERENCE_FASTA}" ]]; then
+
     echo "ERROR: Reference FASTA not found:"
     echo "  ${REFERENCE_FASTA}"
+
     exit 1
+
 fi
 
+
 if [[ ! -f "${REFERENCE_FASTA}.fai" ]]; then
+
     echo "ERROR: Reference FASTA index not found:"
     echo "  ${REFERENCE_FASTA}.fai"
+
     exit 1
+
 fi
+
 
 DICT="${REFERENCE_FASTA%.*}.dict"
 
 if [[ ! -f "${DICT}" ]]; then
+
     echo "ERROR: Reference sequence dictionary not found:"
     echo "  ${DICT}"
+
     exit 1
+
 fi
+
 
 if [[ ! -f "${PANEL_OF_NORMALS}" ]]; then
+
     echo "ERROR: Panel of Normals not found:"
     echo "  ${PANEL_OF_NORMALS}"
+
     exit 1
+
 fi
+
 
 if [[ ! -f "${GERMLINE_RESOURCE}" ]]; then
+
     echo "ERROR: Germline resource not found:"
     echo "  ${GERMLINE_RESOURCE}"
+
     exit 1
+
 fi
 
+
 if [[ ! -d "${FUNCOTATOR_DATA_SOURCES}" ]]; then
+
     echo "ERROR: Funcotator data sources directory not found:"
     echo "  ${FUNCOTATOR_DATA_SOURCES}"
+
     exit 1
+
 fi
+
 
 if [[ -n "${DNA_BAM_PATH}" ]]; then
 
     if [[ ! -f "${DNA_BAM_PATH}" ]]; then
+
         echo "ERROR: Normal BAM not found:"
         echo "  ${DNA_BAM_PATH}"
+
         exit 1
+
     fi
 
 fi
 
-echo "Input validation: OK"
 
 # =============================================================================
-# Start
+# Validate HISAT2 index prefix
 # =============================================================================
 
 echo ""
-echo "============================================================"
-echo "Starting RNA-MuTect pipeline"
-echo "============================================================"
-date
+echo "Validating HISAT2 index..."
+echo "------------------------------------------------------------"
+
+
+if [[ -f "${HISAT2_INDEX}.1.ht2" ]]; then
+
+    HISAT2_INDEX_EXTENSION="ht2"
+
+elif [[ -f "${HISAT2_INDEX}.1.ht2l" ]]; then
+
+    HISAT2_INDEX_EXTENSION="ht2l"
+
+else
+
+    echo "ERROR: HISAT2 index prefix is invalid:"
+    echo "  ${HISAT2_INDEX}"
+
+    echo ""
+    echo "Expected:"
+    echo "  ${HISAT2_INDEX}.1.ht2"
+    echo "or:"
+    echo "  ${HISAT2_INDEX}.1.ht2l"
+
+    exit 1
+
+fi
+
+
+for i in {1..8}; do
+
+    if [[ ! -f "${HISAT2_INDEX}.${i}.${HISAT2_INDEX_EXTENSION}" ]]; then
+
+        echo "ERROR: Missing HISAT2 index file:"
+        echo "  ${HISAT2_INDEX}.${i}.${HISAT2_INDEX_EXTENSION}"
+
+        exit 1
+
+    fi
+
+done
+
+
+echo "HISAT2 index validation: OK"
+
+
+echo ""
+echo "Input validation: OK"
+
 
 # =============================================================================
 # Stage 1 - Setup
 # =============================================================================
 
 echo ""
+echo "============================================================"
+echo "Starting RNA-MuTect pipeline"
+echo "============================================================"
+
+date
+
+
+echo ""
 echo "[STAGE 1/5] Setting up directories and variables..."
+
 
 BASENAME="$(basename "${RNA_BAM_PATH}" .bam)"
 
+
 mkdir -p "${OUTPUT_DIR}"
+
 
 REALIGN_DIR="${OUTPUT_DIR}/hisat2"
 
 mkdir -p "${REALIGN_DIR}"
 
+
 GN="${REFERENCE_FASTA}"
+
 
 RNA_BAM_SPLIT="${OUTPUT_DIR}/${BASENAME}.split.bam"
 
@@ -343,35 +489,58 @@ MERGED_VCF="${OUTPUT_DIR}/${BASENAME}.merged.vcf.gz"
 
 FUNCOMAF="${OUTPUT_DIR}/${BASENAME}.funcotated.maf"
 
+
 CONTIG_LIST="$(cut -f1 "${REFERENCE_FASTA}.fai")"
+
 
 echo "RNA BAM:"
 echo "  ${RNA_BAM_PATH}"
 
+
 echo "Sample:"
 echo "  ${BASENAME}"
+
 
 echo "Reference:"
 echo "  ${GN}"
 
+
 echo "Output:"
 echo "  ${OUTPUT_DIR}"
+
 
 echo "Threads:"
 echo "  ${NUM_PARALLEL_JOBS}"
 
+
+echo "HISAT2 index:"
+echo "  ${HISAT2_INDEX}"
+
+
+echo "Funcotator data sources:"
+echo "  ${FUNCOTATOR_DATA_SOURCES}"
+
+
 # =============================================================================
-# Stage 2 - Initial Mutect2 calling
+# Stage 2 - Initial variant discovery
 # =============================================================================
 
 echo ""
 echo "[STAGE 2/5] Performing initial variant discovery with Mutect2..."
+
 
 # -----------------------------------------------------------------------------
 # SplitNCigarReads
 # -----------------------------------------------------------------------------
 
 echo "--> Running SplitNCigarReads by contig..."
+
+
+export GN
+export RNA_BAM_PATH
+export OUTPUT_DIR
+export BASENAME
+
 
 printf "%s\n" "${CONTIG_LIST}" |
 xargs -I {} \
@@ -388,17 +557,21 @@ xargs -I {} \
 
 ' _ {}
 
+
 # -----------------------------------------------------------------------------
 # Gather split BAMs
 # -----------------------------------------------------------------------------
 
 echo "--> Gathering split BAMs..."
 
+
 find "${OUTPUT_DIR}" \
     -maxdepth 1 \
     -type f \
     -name "${BASENAME}.*.split.bam" \
-    | sort > "${OUTPUT_DIR}/split_bam_list.txt"
+    | sort \
+    > "${OUTPUT_DIR}/split_bam_list.txt"
+
 
 if [[ ! -s "${OUTPUT_DIR}/split_bam_list.txt" ]]; then
 
@@ -408,18 +581,17 @@ if [[ ! -s "${OUTPUT_DIR}/split_bam_list.txt" ]]; then
 
 fi
 
+
 gatk GatherBamFiles \
     -I "${OUTPUT_DIR}/split_bam_list.txt" \
     -O "${RNA_BAM_SPLIT}" \
     -R "${GN}"
 
+
 samtools index \
     -@ "${NUM_PARALLEL_JOBS}" \
     "${RNA_BAM_SPLIT}"
 
-# -----------------------------------------------------------------------------
-# Remove split BAMs
-# -----------------------------------------------------------------------------
 
 while read -r b; do
 
@@ -428,7 +600,9 @@ while read -r b; do
 
 done < "${OUTPUT_DIR}/split_bam_list.txt"
 
+
 rm -f "${OUTPUT_DIR}/split_bam_list.txt"
+
 
 # -----------------------------------------------------------------------------
 # Mutect2
@@ -436,41 +610,39 @@ rm -f "${OUTPUT_DIR}/split_bam_list.txt"
 
 echo "--> Running Mutect2..."
 
+
 if [[ -n "${DNA_BAM_N}" ]]; then
 
     echo " -> Matched-normal mode"
 
-    export GN
-    export RNA_BAM_SPLIT
-    export PANEL_OF_NORMALS
-    export GERMLINE_RESOURCE
-    export OUTPUT_DIR
-    export BASENAME
-    export DNA_BAM_N
-    export NORMAL_SAMPLE_NAME
-
-    export MUTECT2_MODE="matched"
+    MUTECT2_MODE="matched"
 
 else
 
     echo " -> Tumor-only mode"
 
-    export GN
-    export RNA_BAM_SPLIT
-    export PANEL_OF_NORMALS
-    export GERMLINE_RESOURCE
-    export OUTPUT_DIR
-    export BASENAME
-
-    export MUTECT2_MODE="tumor_only"
+    MUTECT2_MODE="tumor_only"
 
 fi
+
+
+export GN
+export RNA_BAM_SPLIT
+export PANEL_OF_NORMALS
+export GERMLINE_RESOURCE
+export OUTPUT_DIR
+export BASENAME
+export DNA_BAM_N
+export NORMAL_SAMPLE_NAME
+export MUTECT2_MODE
+
 
 mutect2_contig() {
 
     local chr="$1"
 
     local output="${OUTPUT_DIR}/${BASENAME}.${chr}.vcf.gz"
+
 
     if [[ "${MUTECT2_MODE}" == "matched" ]]; then
 
@@ -498,12 +670,15 @@ mutect2_contig() {
 
 }
 
+
 export -f mutect2_contig
+
 
 printf "%s\n" "${CONTIG_LIST}" |
 xargs -I {} \
       -P "${NUM_PARALLEL_JOBS}" \
       bash -c 'mutect2_contig "$1"' _ {}
+
 
 # -----------------------------------------------------------------------------
 # Merge VCF
@@ -511,11 +686,14 @@ xargs -I {} \
 
 echo "--> Merging parallel VCF results..."
 
+
 find "${OUTPUT_DIR}" \
     -maxdepth 1 \
     -type f \
     -name "${BASENAME}.*.vcf.gz" \
-    | sort > "${OUTPUT_DIR}/vcf_list.txt"
+    | sort \
+    > "${OUTPUT_DIR}/vcf_list.txt"
+
 
 if [[ ! -s "${OUTPUT_DIR}/vcf_list.txt" ]]; then
 
@@ -525,13 +703,11 @@ if [[ ! -s "${OUTPUT_DIR}/vcf_list.txt" ]]; then
 
 fi
 
+
 gatk MergeVcfs \
     -I "${OUTPUT_DIR}/vcf_list.txt" \
     -O "${MERGED_VCF}"
 
-# -----------------------------------------------------------------------------
-# Cleanup intermediate VCFs
-# -----------------------------------------------------------------------------
 
 while read -r vcf_file; do
 
@@ -541,7 +717,9 @@ while read -r vcf_file; do
 
 done < "${OUTPUT_DIR}/vcf_list.txt"
 
+
 rm -f "${OUTPUT_DIR}/vcf_list.txt"
+
 
 # =============================================================================
 # Stage 3 - Funcotator
@@ -550,11 +728,13 @@ rm -f "${OUTPUT_DIR}/vcf_list.txt"
 echo ""
 echo "[STAGE 3/5] Annotating variants with Funcotator..."
 
+
 funcotator_contig() {
 
     local chr="$1"
 
     echo "    -> Annotating contig: ${chr}"
+
 
     gatk Funcotator \
         --variant "${MERGED_VCF}" \
@@ -567,6 +747,7 @@ funcotator_contig() {
 
 }
 
+
 export -f funcotator_contig
 
 export MERGED_VCF
@@ -575,16 +756,19 @@ export FUNCOTATOR_DATA_SOURCES
 export OUTPUT_DIR
 export BASENAME
 
+
 printf "%s\n" "${CONTIG_LIST}" |
 xargs -I {} \
       -P "${NUM_PARALLEL_JOBS}" \
       bash -c 'funcotator_contig "$1"' _ {}
+
 
 # -----------------------------------------------------------------------------
 # Merge MAFs
 # -----------------------------------------------------------------------------
 
 echo "--> Merging MAF results..."
+
 
 mapfile -t MAF_FILES < <(
     find "${OUTPUT_DIR}" \
@@ -595,6 +779,7 @@ mapfile -t MAF_FILES < <(
         | sort
 )
 
+
 if [[ "${#MAF_FILES[@]}" -eq 0 ]]; then
 
     echo "FATAL: No MAF files were generated by Funcotator."
@@ -603,9 +788,14 @@ if [[ "${#MAF_FILES[@]}" -eq 0 ]]; then
 
 fi
 
+
 FIRST_MAF="${MAF_FILES[0]}"
 
-grep "^Hugo_Symbol" "${FIRST_MAF}" > "${FUNCOMAF}"
+
+grep "^Hugo_Symbol" \
+    "${FIRST_MAF}" \
+    > "${FUNCOMAF}"
+
 
 for maf in "${MAF_FILES[@]}"; do
 
@@ -613,11 +803,13 @@ for maf in "${MAF_FILES[@]}"; do
 
 done
 
+
 for maf in "${MAF_FILES[@]}"; do
 
     rm -f "${maf}"
 
 done
+
 
 # =============================================================================
 # Stage 4 - Targeted re-alignment
@@ -626,11 +818,13 @@ done
 echo ""
 echo "[STAGE 4/5] Performing targeted re-alignment with HISAT2..."
 
+
 # -----------------------------------------------------------------------------
 # Create BED
 # -----------------------------------------------------------------------------
 
 echo "--> Creating BED file from MAF..."
+
 
 awk '
 BEGIN {
@@ -666,6 +860,7 @@ $7 ~ /^[0-9]+$/ {
 ' "${FUNCOMAF}" \
 > "${REALIGN_DIR}/variants.bed"
 
+
 if [[ ! -s "${REALIGN_DIR}/variants.bed" ]]; then
 
     echo "ERROR: No variants were found for re-alignment."
@@ -673,6 +868,7 @@ if [[ ! -s "${REALIGN_DIR}/variants.bed" ]]; then
     exit 1
 
 fi
+
 
 # -----------------------------------------------------------------------------
 # BED -> IntervalList
@@ -683,11 +879,13 @@ gatk BedToIntervalList \
     -O "${REALIGN_DIR}/variants.interval_list" \
     -SD "${GN}"
 
+
 # -----------------------------------------------------------------------------
 # RNA read names
 # -----------------------------------------------------------------------------
 
 echo "--> Extracting RNA read names..."
+
 
 samtools view \
     -@ "${NUM_PARALLEL_JOBS}" \
@@ -696,6 +894,7 @@ samtools view \
 cut -f1 |
 sort -u \
 > "${REALIGN_DIR}/${BASENAME}_read_names.txt"
+
 
 # -----------------------------------------------------------------------------
 # Filter RNA BAM
@@ -707,6 +906,7 @@ gatk FilterSamReads \
     --READ_LIST_FILE "${REALIGN_DIR}/${BASENAME}_read_names.txt" \
     --FILTER includeReadList
 
+
 # -----------------------------------------------------------------------------
 # BAM -> FASTQ
 # -----------------------------------------------------------------------------
@@ -716,11 +916,13 @@ gatk SamToFastq \
     -F "${REALIGN_DIR}/${BASENAME}_1.fastq.gz" \
     -F2 "${REALIGN_DIR}/${BASENAME}_2.fastq.gz"
 
+
 # -----------------------------------------------------------------------------
 # HISAT2 RNA
 # -----------------------------------------------------------------------------
 
 echo "--> Re-aligning RNA reads..."
+
 
 hisat2 \
     -p "${NUM_PARALLEL_JOBS}" \
@@ -734,9 +936,11 @@ samtools sort \
     -@ "${NUM_PARALLEL_JOBS}" \
     -o "${REALIGN_DIR}/${BASENAME}.realigned.bam"
 
+
 samtools index \
     -@ "${NUM_PARALLEL_JOBS}" \
     "${REALIGN_DIR}/${BASENAME}.realigned.bam"
+
 
 # -----------------------------------------------------------------------------
 # Optional normal DNA re-alignment
@@ -746,6 +950,7 @@ if [[ -n "${DNA_BAM_N}" ]]; then
 
     echo "--> Re-aligning DNA reads..."
 
+
     samtools view \
         -@ "${NUM_PARALLEL_JOBS}" \
         -L "${REALIGN_DIR}/variants.bed" \
@@ -754,16 +959,19 @@ if [[ -n "${DNA_BAM_N}" ]]; then
     sort -u \
     > "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}_read_names.txt"
 
+
     gatk FilterSamReads \
         -I "${DNA_BAM_N}" \
         -O "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}.filtered.bam" \
         --READ_LIST_FILE "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}_read_names.txt" \
         --FILTER includeReadList
 
+
     gatk SamToFastq \
         -I "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}.filtered.bam" \
         -F "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}_1.fastq.gz" \
         -F2 "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}_2.fastq.gz"
+
 
     hisat2 \
         -p "${NUM_PARALLEL_JOBS}" \
@@ -777,11 +985,13 @@ if [[ -n "${DNA_BAM_N}" ]]; then
         -@ "${NUM_PARALLEL_JOBS}" \
         -o "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}.realigned.bam"
 
+
     samtools index \
         -@ "${NUM_PARALLEL_JOBS}" \
         "${REALIGN_DIR}/${NORMAL_SAMPLE_NAME}.realigned.bam"
 
 fi
+
 
 # -----------------------------------------------------------------------------
 # Cleanup
@@ -790,6 +1000,7 @@ fi
 rm -f "${REALIGN_DIR}"/*.filtered.bam
 rm -f "${REALIGN_DIR}"/*_read_names.txt
 
+
 # =============================================================================
 # Stage 5 - Final Mutect2
 # =============================================================================
@@ -797,11 +1008,14 @@ rm -f "${REALIGN_DIR}"/*_read_names.txt
 echo ""
 echo "[STAGE 5/5] Final variant re-calling..."
 
+
 FINAL_VCF_OUT="${REALIGN_DIR}/${BASENAME}.realigned.vcf.gz"
+
 
 if [[ -n "${DNA_BAM_N}" ]]; then
 
     echo "--> Final Mutect2 in matched-normal mode..."
+
 
     gatk Mutect2 \
         -R "${GN}" \
@@ -817,6 +1031,7 @@ else
 
     echo "--> Final Mutect2 in tumor-only mode..."
 
+
     gatk Mutect2 \
         -R "${GN}" \
         -I "${REALIGN_DIR}/${BASENAME}.realigned.bam" \
@@ -827,6 +1042,7 @@ else
 
 fi
 
+
 # =============================================================================
 # Complete
 # =============================================================================
@@ -836,12 +1052,15 @@ echo "============================================================"
 echo "RNA-MuTect pipeline completed successfully."
 echo "============================================================"
 
+
 echo ""
 echo "Output directory:"
 echo "  ${OUTPUT_DIR}"
 
+
 echo ""
 echo "Final VCF:"
 echo "  ${FINAL_VCF_OUT}"
+
 
 date
